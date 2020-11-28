@@ -21,6 +21,7 @@
  */
 
 #include <airspy.h>
+#include <wiringPi.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +34,9 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <limits.h>
+
+// Use GPIO Pin 18, which is Pin 1 for wiringPi library
+#define BUTTON_PIN 1
 
 #define AIRSPY_RX_VERSION "1.0.5 23 April 2016"
 
@@ -123,7 +127,7 @@ int gettimeofday(struct timeval *tv, void* ignored)
 #define MIN_SAMPLERATE_BY_VALUE (1000000)
 
 /* WAVE or RIFF WAVE file format containing data for AirSpy compatible with SDR# Wav IQ file */
-typedef struct 
+typedef struct
 {
 		char groupID[4]; /* 'RIFF' */
 		uint32_t size; /* File size + 8bytes */
@@ -144,7 +148,7 @@ typedef struct {
 	uint16_t wBitsPerSample;
 } t_FormatChunk;
 
-typedef struct 
+typedef struct
 {
 		char chunkID[4]; /* 'data' */
 		uint32_t chunkSize; /* Size of data in bytes */
@@ -158,7 +162,7 @@ typedef struct
 	t_DataChunk data_chunk;
 } t_wav_file_hdr;
 
-t_wav_file_hdr wave_file_hdr = 
+t_wav_file_hdr wave_file_hdr =
 {
 	/* t_WAVRIFF_hdr */
 	{
@@ -185,7 +189,7 @@ t_wav_file_hdr wave_file_hdr =
 };
 
 #define U64TOA_MAX_DIGIT (31)
-typedef struct 
+typedef struct
 {
 		char data[U64TOA_MAX_DIGIT+1];
 } t_u64toa;
@@ -228,7 +232,7 @@ float global_average_rate = 0.0f;
 uint32_t rate_samples = 0;
 uint32_t buffer_count = 0;
 uint32_t sample_count = 0;
-	
+
 bool freq = false;
 uint32_t freq_hz;
 
@@ -367,7 +371,7 @@ int rx_callback(airspy_transfer_t* transfer)
 	struct timeval time_now;
 	float time_difference, rate;
 
-	if( fd != NULL ) 
+	if( fd != NULL )
 	{
 		switch(sample_type_val)
 		{
@@ -453,8 +457,8 @@ int rx_callback(airspy_transfer_t* transfer)
 		{
 			bytes_written = 0;
 		}
-		if ( (bytes_written != bytes_to_write) || 
-				 ((limit_num_samples == true) && (bytes_to_xfer == 0)) 
+		if ( (bytes_written != bytes_to_write) ||
+				 ((limit_num_samples == true) && (bytes_to_xfer == 0))
 				)
 			return -1;
 		else
@@ -504,7 +508,7 @@ sighandler(int signum)
 	return FALSE;
 }
 #else
-void sigint_callback_handler(int signum) 
+void sigint_callback_handler(int signum)
 {
 	fprintf(stderr, "Caught signal %d\n", signum);
 	do_exit = true;
@@ -513,6 +517,13 @@ void sigint_callback_handler(int signum)
 
 #define PATH_FILE_MAX_LEN (FILENAME_MAX)
 #define DATE_TIME_MAX_LEN (32)
+
+/*****************************************************
+    This is called when the Pi GPIO is pulled high
+*****************************************************/
+void myInterrupt(void) {
+   airspy_start_rx(device, rx_callback, NULL);
+}
 
 int main(int argc, char** argv)
 {
@@ -541,7 +552,7 @@ int main(int argc, char** argv)
 	while( (opt = getopt(argc, argv, "r:ws:p:f:a:t:b:v:m:l:g:h:n:d")) != EOF )
 	{
 		result = AIRSPY_SUCCESS;
-		switch( opt ) 
+		switch( opt )
 		{
 			case 'r':
 				receive = true;
@@ -665,7 +676,7 @@ int main(int argc, char** argv)
 
 			case 'g':
 				linearity_gain = true;
-				result = parse_u32(optarg, &linearity_gain_val);		
+				result = parse_u32(optarg, &linearity_gain_val);
 			break;
 
 			case 'h':
@@ -687,13 +698,21 @@ int main(int argc, char** argv)
 				usage();
 				return EXIT_FAILURE;
 		}
-		
+
 		if( result != AIRSPY_SUCCESS ) {
 			fprintf(stderr, "argument error: '-%c %s' %s (%d)\n", opt, optarg, airspy_error_name(result), result);
 			usage();
 			return EXIT_FAILURE;
 		}
 	}
+
+	/*************************************************
+	           Set up the wiringpi stuff
+	*************************************************/
+	if (wiringPiSetup () < 0) {
+      fprintf (stderr, "Unable to setup wiringPi: %s\n", strerror (errno));
+      return 1;
+  }
 
 	if (sample_rate)
 	{
@@ -725,7 +744,7 @@ int main(int argc, char** argv)
 	}
 
 	receiver_mode = RECEIVER_MODE_RX;
-	if( receive_wav ) 
+	if( receive_wav )
 	{
 		if (sample_type_val == AIRSPY_SAMPLE_RAW)
 		{
@@ -916,7 +935,7 @@ int main(int argc, char** argv)
 	{
 		fprintf(stderr, "sample_rate -a %d (%f MSPS %s)\n", sample_rate_val, wav_sample_per_sec * 0.000001f, wav_nb_channels == 1 ? "Real" : "IQ");
 	}
-	
+
 	result = airspy_board_partid_serialno_read(device, &read_partid_serialno);
 	if (result != AIRSPY_SUCCESS) {
 			fprintf(stderr, "airspy_board_partid_serialno_read() failed: %s (%d)\n",
@@ -966,13 +985,13 @@ int main(int argc, char** argv)
 		airspy_exit();
 		return EXIT_FAILURE;
 	}
-	
+
 	/* Write Wav header */
-	if( receive_wav ) 
+	if( receive_wav )
 	{
 		fwrite(&wave_file_hdr, 1, sizeof(t_wav_file_hdr), fd);
 	}
-	
+
 #ifdef _MSC_VER
 	SetConsoleCtrlHandler( (PHANDLER_ROUTINE) sighandler, TRUE );
 #else
@@ -1019,7 +1038,13 @@ int main(int argc, char** argv)
 		}
 	}
 
-	result = airspy_start_rx(device, rx_callback, NULL);
+/*************************************************************
+
+            Start RX is called here!
+
+*************************************************************/
+
+	result = wiringPiISR (BUTTON_PIN, INT_EDGE_FALLING, &myInterrupt);
 	if( result != AIRSPY_SUCCESS ) {
 		fprintf(stderr, "airspy_start_rx() failed: %s (%d)\n", airspy_error_name(result), result);
 		airspy_close(device);
@@ -1053,15 +1078,15 @@ int main(int argc, char** argv)
 		else
 			sleep(1);
 	}
-	
-	result = airspy_is_streaming(device);	
+
+	result = airspy_is_streaming(device);
 	if (do_exit)
 	{
 		fprintf(stderr, "\nUser cancel, exiting...\n");
 	} else {
 		fprintf(stderr, "\nExiting...\n");
 	}
-	
+
 	gettimeofday(&t_end, NULL);
 	time_diff = TimevalDiff(&t_end, &t_start);
 	fprintf(stderr, "Total time: %5.4f s\n", time_diff);
@@ -1069,7 +1094,7 @@ int main(int argc, char** argv)
 	{
 		fprintf(stderr, "Average speed %2.4f MSPS %s\n", (global_average_rate * 1e-6f / rate_samples), (wav_nb_channels == 2 ? "IQ" : "Real"));
 	}
-	
+
 	if(device != NULL)
 	{
 		result = airspy_stop_rx(device);
@@ -1078,17 +1103,17 @@ int main(int argc, char** argv)
 		}
 
 		result = airspy_close(device);
-		if( result != AIRSPY_SUCCESS ) 
+		if( result != AIRSPY_SUCCESS )
 		{
 			fprintf(stderr, "airspy_close() failed: %s (%d)\n", airspy_error_name(result), result);
 		}
-		
+
 		airspy_exit();
 	}
-		
+
 	if(fd != NULL)
 	{
-		if( receive_wav ) 
+		if( receive_wav )
 		{
 			/* Get size of file */
 			file_pos = ftell(fd);
@@ -1106,7 +1131,7 @@ int main(int argc, char** argv)
 			/* Overwrite header with updated data */
 			rewind(fd);
 			fwrite(&wave_file_hdr, 1, sizeof(t_wav_file_hdr), fd);
-		}	
+		}
 		fclose(fd);
 		fd = NULL;
 	}

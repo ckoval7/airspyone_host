@@ -64,6 +64,9 @@ if(MSVC)
 LIST(APPEND TOOLS_LINK_LIBS libgetopt_static)
 endif()
 
+find_library(WIRINGPI_LIBRARIES NAMES wiringPi)
+target_link_libraries(airspy_rx ${WIRINGPI_LIBRARIES})
+
 target_link_libraries(airspy_gpio ${TOOLS_LINK_LIBS})
 target_link_libraries(airspy_gpiodir ${TOOLS_LINK_LIBS})
 target_link_libraries(airspy_lib_version ${TOOLS_LINK_LIBS})

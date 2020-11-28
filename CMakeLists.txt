@@ -44,4 +44,3 @@ if(WIN32 AND NOT CMAKE_CROSSCOMPILING)
  COPYONLY)
  endif()
 endif()
-
